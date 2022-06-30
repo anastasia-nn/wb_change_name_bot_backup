@@ -1,6 +1,8 @@
+import time
+
 import requests
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
-from wb import search_data, get_card_info, prepare_card_info, info_to_upload
+from change_name import search_data, get_card_info, prepare_card_info, info_to_upload
 
 # state options
 ENTER_API_KEY = 1
@@ -17,12 +19,17 @@ def start(update, context):
 def received_api_key(update, context):
     api_key = update.message.text
     try:
-        info = requests.get('https://suppliers-api.wildberries.ru/api/v1/directory/wbsizes',
+        for i in range(5):
+            info = requests.get('https://suppliers-api.wildberries.ru/api/v1/directory/wbsizes',
                             headers={"Authorization": api_key})
+            if info.status_code == 200 or info.status_code == 401:
+                break
+            else:
+                time.sleep(1)
 
         if info.status_code != 200:
             update.message.reply_text("Что-то пошло не так..." + str(info.status_code))
-            update.message.reply_text("Статус" + str(info.status_code))
+            update.message.reply_text("Статус " + str(info.status_code))
             if info.status_code == 401:
                 update.message.reply_text("Введён неверный API ключ")
             update.message.reply_text("Попробуйте ещё раз")
@@ -36,6 +43,15 @@ def received_api_key(update, context):
         update.message.reply_text("Что-то пошло не так 1...")
 
 
+def change_name(update, info, context):
+    info = prepare_card_info(info=info, headers={"Authorization": context.user_data['api_key']})
+    context.user_data['card_info'] = info
+    context.user_data['state'] = ENTER_NEW_NAME
+    update.message.reply_text("Текущее наименование товара: {}".format(info['card']['addin'][1]['params'][0]['value']))
+    update.message.reply_text(
+        "Введите новое наименование товара. После отправки сообщения наименование будет изменено.")
+
+
 def received_nm_id(update, context):
     try:
         nm_id = int(update.message.text)
@@ -44,28 +60,32 @@ def received_nm_id(update, context):
         raise ValueError("invalid value")
     data = search_data(nm_id)
     try:
-        info = get_card_info(data=data, headers={"Authorization": context.user_data['api_key']})
-        update.message.reply_text("Информация о товаре загружена. Статус " + str(info.status_code))
-        if info.status_code != 200:
-            update.message.reply_text("Что-то пошло не так 2...")
-            if info.status_code == 401:
-                update.message.reply_text("Номенклатура не найдена")
-            update.message.reply_text("Попробуйте ещё раз")
+        for i in range(5):
+            info = get_card_info(data=data, headers={"Authorization": context.user_data['api_key']})
+            # update.message.reply_text("Информация о товаре загружена. Статус " + str(info.status_code))
+            if info.status_code == 200:
+                break
+            else:
+                time.sleep(1)
+
+        if info.status_code == 200:
+            change_name(update, info, context)
+        elif info.status_code == 401:
+            update.message.reply_text("Номенклатура не найдена. Попробуйте ещё раз.")
         else:
-            info = prepare_card_info(info=info, headers={"Authorization": context.user_data['api_key']})
-            context.user_data['card_info'] = info
-            context.user_data['state'] = ENTER_NEW_NAME
-            update.message.reply_text("Текущее наименование товара: {}".format(info['card']['addin'][1]['params'][0]['value']))
-            update.message.reply_text("Введите новое наименование товара. После отправки сообщения наименование будет изменено.")
+            update.message.reply_text(
+                "Что-то пошло не так при загрузке карточки товара. Попробуйте ввести номенклатуру ещё раз.")
     except:
-        update.message.reply_text("Что-то пошло не так 22...")
+        update.message.reply_text("Что-то пошло не так. Код ошибки {}. Попробуйте ещё раз.".format(info.status_code))
 
 
 def received_new_name(update, context):
     new_name = str(update.message.text)
     try:
         info = info_to_upload(context.user_data['card_info'], new_name)
-        updated_info = requests.post('https://suppliers-api.wildberries.ru/card/update', json=info, headers={"Authorization": context.user_data['api_key']})
+        updated_info = requests.post('https://suppliers-api.wildberries.ru/card/update',
+                                     json=info,
+                                     headers={"Authorization": context.user_data['api_key']})
         if updated_info.status_code != 200:
             update.message.reply_text("Что-то пошло не так...")
             update.message.reply_text("Попробуйте ещё раз")
@@ -76,7 +96,7 @@ def received_new_name(update, context):
             update.message.reply_text("Введите номенклатуру товара, у которого хотите изменить наименование")
     except:
         update.message.reply_text(
-            "Что-то пошло не так 3...")
+            "Что-то пошло не так. Попробуйте ещё раз.")
 
 
 # function to handle the /help command

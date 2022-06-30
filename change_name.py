@@ -41,7 +41,6 @@ def search_data(nm_id):
 
 def get_card_info(data, headers):
     info = requests.post('https://suppliers-api.wildberries.ru/card/list', json=data, headers=headers)
-
     return info
 
 
